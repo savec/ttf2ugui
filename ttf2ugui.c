@@ -66,6 +66,18 @@ static int max(int a, int b)
   return b;
 }
 
+UG_RESULT searchUnicode(const UG_FONT * font, wchar_t *unicode, UG_U32 index)
+{
+  int i;
+  for(i = 0; i < font->dict_size; i++)
+    if(font->dict[i].index == index)
+    {
+      *unicode = font->dict[i].unicode;
+      return UG_RESULT_OK;
+    }
+  return UG_RESULT_FAIL;
+}
+
 /*
  * Output C-language code that can be used to include 
  * converted font into uGUI application.
@@ -141,8 +153,11 @@ static void dumpFont(const UG_FONT * font, const char* fontFile, float fontSize)
       fprintf(out, ", ");
     else
       fprintf(out, " ");
+    
+    wchar_t uc;
+    if(searchUnicode(font, &uc, ch) == UG_RESULT_OK)
+      fprintf(out, " // 0x%X", uc);
     fprintf(out, "\n");
-    // fwprintf(out, L" // 0x%X '%c'\n", ch, (wchar_t)ch);
   }
 
   fprintf(out, "};\n");
