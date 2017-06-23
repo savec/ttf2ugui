@@ -31,6 +31,9 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <ft2build.h>
+#include <wchar.h>
+#include <locale.h>
+
 #include FT_FREETYPE_H
 
 #define SCREEN_WIDTH 132
@@ -118,10 +121,10 @@ static void dumpFont(const UG_FONT * font, const char* fontFile, float fontSize)
   fprintf(out, "// For copyright, see original font file.\n");
   fprintf(out, "\n#include \"ugui.h\"\n\n");
 
-  fprintf(out, "static __UG_FONT_DATA unsigned char fontBits_%s[%d][%d] = {\n", fontName, font->end_char - font->start_char + 1, bytesPerChar);
+  fprintf(out, "static __UG_FONT_DATA unsigned char fontBits_%s[%d][%d] = {\n", fontName, font->num_chars, bytesPerChar);
 
   current = 0;
-  for (ch = font->start_char; ch <= font->end_char; ch++) {
+  for (ch = 0; ch < font->num_chars; ch++) {
 
     fprintf(out, "  {");
     for (b = 0; b < bytesPerChar; b++) {
@@ -134,12 +137,12 @@ static void dumpFont(const UG_FONT * font, const char* fontFile, float fontSize)
     }
 
     fprintf(out, " }");
-    if (ch <= font->end_char - 1)
-      fprintf(out, ",");
+    if (ch <= font->num_chars - 1)
+      fprintf(out, ", ");
     else
       fprintf(out, " ");
-
-    fprintf(out, " // 0x%X '%c'\n", ch, ch);
+    fprintf(out, "\n");
+    // fwprintf(out, L" // 0x%X '%c'\n", ch, (wchar_t)ch);
   }
 
   fprintf(out, "};\n");
@@ -149,12 +152,27 @@ static void dumpFont(const UG_FONT * font, const char* fontFile, float fontSize)
  */
   fprintf(out, "static const UG_U8 fontWidths_%s[] = {\n", fontName);
 
-  for (ch = font->start_char; ch <= font->end_char; ch++) {
+  for (ch = 0; ch < font->num_chars; ch++) {
 
-    if (ch != font->start_char)
-      fprintf(out, ",");
+    if (ch != 0)
+      fprintf(out, ", ");
 
-    fprintf(out, "%d", font->widths[ch - font->start_char]);
+    fprintf(out, "%d", font->widths[ch]);
+  }
+
+  fprintf(out, "};\n");
+
+/*
+ * Next output dictionary (unicode -> index).
+ */
+  fprintf(out, "static const UG_CHAR_CODE fontDict_%s[] = {\n", fontName);
+
+  for (ch = 0; ch < font->dict_size; ch++) {
+
+    if (ch != 0)
+      fprintf(out, ", ");
+
+    fprintf(out, "{%d, %u}", font->dict[ch].unicode, font->dict[ch].index);
   }
 
   fprintf(out, "};\n");
@@ -162,14 +180,16 @@ static void dumpFont(const UG_FONT * font, const char* fontFile, float fontSize)
 /*
  * Last, output UG_FONT structure.
  */
-  fprintf(out, "const UG_FONT font_%s = { (unsigned char*)fontBits_%s, FONT_TYPE_1BPP, %d, %d, %d, %d, fontWidths_%s };\n",
+  fprintf(out, "const UG_FONT font_%s = { (unsigned char*)fontBits_%s, FONT_TYPE_1BPP, %d, %d, %d, fontWidths_%s, fontDict_%s, %d };\n",
           fontName,
           fontName,
           font->char_width,
           font->char_height,
-          font->start_char,
-          font->end_char,
-          fontName);
+          font->num_chars,
+          fontName,
+          fontName,
+          font->dict_size
+          );
 
   fclose(out);
 
@@ -230,26 +250,28 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
     exit(1);
   }
 
-  int i, j;
-  int minChar = 32;
-  int maxChar = 126;
-  int ch;
+  FT_ULong  charcode;
+  FT_UInt   gindex;
+
+  charcode = FT_Get_First_Char( face, &gindex );
+
+  int minChar = gindex;
+  int maxChar = 0;
+  int num_chars;
+  // int ch;
   int maxWidth = 0;
   int maxHeight = 0;
   int maxAscent = 0;
   int maxDescent = 0;
   int bytesPerChar;
 
-/*
- * First found out how big character bitmap is needed. Every character
- * must fit into it so that we can obtain correct character positioning.
- */
-  for (ch = minChar; ch <= maxChar; ch++) {
-
+  int dict_size = 0;
+  while ( gindex != 0 )
+  {
     int ascent;
     int descent;
 
-    error = FT_Load_Char(face, ch, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO);
+    error = FT_Load_Char(face, charcode, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO);
     if (error) {
 
       fprintf(stderr, "load char err %d\n", error);
@@ -258,17 +280,21 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
 
     descent = max(0, face->glyph->bitmap.rows - face->glyph->bitmap_top);
     ascent = max(0, max(face->glyph->bitmap_top, face->glyph->bitmap.rows) - descent);
+    maxDescent = max(maxDescent, descent);
+    maxAscent = max(maxAscent, ascent);
+    maxWidth = max(face->glyph->bitmap.width, maxWidth);
+    maxChar = max(maxChar, gindex);
 
-    if (descent > maxDescent)
-      maxDescent = descent;
-
-    if (ascent > maxAscent)
-      maxAscent = ascent;
-
-    if (face->glyph->bitmap.width > maxWidth)
-      maxWidth = face->glyph->bitmap.width;
+    ++dict_size;
+      charcode = FT_Get_Next_Char( face, charcode, &gindex );
   }
 
+  num_chars = maxChar - minChar + 1;
+
+/*
+ * First found out how big character bitmap is needed. Every character
+ * must fit into it so that we can obtain correct character positioning.
+ */
   int bytesPerRow = maxWidth / 8;
 
   if (maxWidth % 8)
@@ -277,28 +303,34 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
   maxHeight = maxAscent + maxDescent;
   bytesPerChar = bytesPerRow * maxHeight;
 
-  newFont.p = malloc(bytesPerChar * (maxChar - minChar + 1));
-  memset(newFont.p, '\0', bytesPerChar * (maxChar - minChar + 1));
+  newFont.p = malloc(bytesPerChar * num_chars);
+  memset(newFont.p, '\0', bytesPerChar * num_chars);
 
   newFont.font_type = FONT_TYPE_1BPP;
   newFont.char_width = maxWidth;
   newFont.char_height = maxHeight;
-  newFont.start_char = minChar;
-  newFont.end_char = maxChar;
-  newFont.widths = malloc(maxChar - minChar + 1);
+  newFont.widths = malloc(num_chars);
+  newFont.num_chars = num_chars;
+
+  newFont.dict = malloc(sizeof(UG_CHAR_CODE)*dict_size);
+  memset(newFont.dict, 0, sizeof(UG_CHAR_CODE)*dict_size);
+  newFont.dict_size = dict_size;
 
 /*
  * Render each character.
  */
-  for (ch = minChar; ch <= maxChar; ch++) {
-
-    error = FT_Load_Char(face, ch, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO);
+  UG_CHAR_CODE *pdict = newFont.dict;
+  charcode = FT_Get_First_Char( face, &gindex );
+  while ( gindex != 0 )
+  {
+    error = FT_Load_Char(face, charcode, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO);
     if (error) {
 
       fprintf(stderr, "load char err %d\n", error);
       exit(1);
     }
 
+    int i, j;
     for (i = 0; i < face->glyph->bitmap.rows; i++)
       for (j = 0; j < face->glyph->bitmap.width; j++) {
 
@@ -319,14 +351,19 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
         ind += xpos / 8;
 
         if (b & (1 << (7 - (j % 8))))
-          newFont.p[((ch - minChar) * bytesPerChar) + ind] |= (1 << ((xpos % 8)));
+          newFont.p[((gindex - minChar) * bytesPerChar) + ind] |= (1 << ((xpos % 8)));
 
       }
+
+    pdict->unicode = charcode;
+    pdict->index = gindex - minChar;
+    pdict ++;
 /*
  * Save character width, freetype uses 1/64 as units for it.
  */
-    newFont.widths[ch - minChar] = face->glyph->advance.x >> 6;
+    newFont.widths[gindex - minChar] = face->glyph->advance.x >> 6;
 
+    charcode = FT_Get_Next_Char( face, charcode, &gindex );
   }
 
   return &newFont;
@@ -335,7 +372,7 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
 /*
  * Draw a simple sample of new font with uGUI.
  */
-static void showFont(const UG_FONT * font, char* text)
+static void showFont(const UG_FONT * font, wchar_t* text)
 {
   UG_Init(&gui, drawPixel, SCREEN_WIDTH, SCREEN_HEIGHT);
 
@@ -351,13 +388,12 @@ static void showFont(const UG_FONT * font, char* text)
   printf("\n");
 }
 
-static int dump;
+static int dump, show;
 static char* fontFile = NULL;
-static char* showText = NULL;
 
  /* options descriptor */
 static struct option longopts[] = {
-  {"show", required_argument, NULL, 'a'},
+  {"show", no_argument, &show, 1},
   {"dump", no_argument, &dump, 1},
   {"dpi", required_argument, NULL, 'd'},
   {"size", required_argument, NULL, 's'},
@@ -367,12 +403,13 @@ static struct option longopts[] = {
 
 static void usage()
 {
-  fprintf(stderr, "ttf2ugui {--show text|--dump} --font=fontfile [--dpi=displaydpi] --size=fontsize\n");
+  fprintf(stderr, "ttf2ugui {--show|--dump} --font=fontfile [--dpi=displaydpi] --size=fontsize\n");
   fprintf(stderr, "If --dpi is not given, font size is assumed to be pixels.\n");
 }
 
 int main(int argc, char **argv)
 {
+  setlocale(LC_CTYPE, "");
   int ch;
 
   while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
@@ -380,10 +417,6 @@ int main(int argc, char **argv)
     switch (ch) {
     case 'f':
       fontFile = optarg;
-      break;
-
-    case 'a':
-      showText = optarg;
       break;
 
     case 's':
@@ -403,10 +436,7 @@ int main(int argc, char **argv)
     }
   }
 
-  argc -= optind;
-  argv += optind;
-
-  if ((!dump && showText == NULL) || fontFile == NULL || fontSize == 0) {
+  if ((!dump && !show) || fontFile == NULL || fontSize == 0) {
 
     usage();
     exit(1);
@@ -416,8 +446,13 @@ int main(int argc, char **argv)
 
   font = convertFont(fontFile, dpi, fontSize);
 
-  if (showText)
-    showFont(font, showText);
+  if (show)
+  {
+#define MAX_TEST_STR  256
+    wchar_t test_str[MAX_TEST_STR];
+    if(fgetws(test_str, MAX_TEST_STR, stdin) != NULL)
+      showFont(font, test_str);
+  }
 
   if (dump)
     dumpFont(font, fontFile, fontSize);

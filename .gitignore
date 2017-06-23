@@ -3,3 +3,8 @@ ttf2ugui
 *.BAK
 *.ttf
 *.otf
+GPATH
+GRTAGS
+GTAGS
+/anonymous_pro_regular
+*.sublime-project

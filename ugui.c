@@ -32,7 +32,8 @@
 //  Oct 11, 2014  V0.1  First release.
 /* -------------------------------------------------------------------------------- */
 #include "ugui.h"
-
+#include <wchar.h>
+#include <stdio.h>
 /* Static functions */
  UG_RESULT _UG_WindowDrawTitle( UG_WINDOW* wnd );
  void _UG_WindowUpdate( UG_WINDOW* wnd );
@@ -40,7 +41,7 @@
  void _UG_TextboxUpdate(UG_WINDOW* wnd, UG_OBJECT* obj);
  void _UG_ButtonUpdate(UG_WINDOW* wnd, UG_OBJECT* obj);
  void _UG_ImageUpdate(UG_WINDOW* wnd, UG_OBJECT* obj);
- void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const UG_FONT* font);
+ void _UG_PutChar( wchar_t chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const UG_FONT* font);
 
  /* Pointer to the gui */
 static UG_GUI* gui;
@@ -4290,8 +4291,7 @@ UG_S16 UG_Init( UG_GUI* g, void (*p)(UG_S16,UG_S16,UG_COLOR), UG_S16 x, UG_S16 y
    g->font.p = NULL;
    g->font.char_height = 0;
    g->font.char_width = 0;
-   g->font.start_char = 0;
-   g->font.end_char = 0;
+   g->font.num_chars = 0;
    g->font.widths = NULL;
    g->desktop_color = 0x5E8BEf;
    g->fore_color = C_WHITE;
@@ -4662,11 +4662,24 @@ void UG_DrawLine( UG_S16 x1, UG_S16 y1, UG_S16 x2, UG_S16 y2, UG_COLOR c )
    }
 }
 
-void UG_PutString( UG_S16 x, UG_S16 y, char* str )
+UG_RESULT _UG_SearchIndex(wchar_t unicode, UG_U32 *index)
+{
+	int i;
+	for(i = 0; i < gui->font.dict_size; i++)
+		if(gui->font.dict[i].unicode == unicode)
+		{
+			*index = gui->font.dict[i].index;
+			return UG_RESULT_OK;
+		}
+	return UG_RESULT_FAIL;
+}
+
+void UG_PutString( UG_S16 x, UG_S16 y, wchar_t* str )
 {
    UG_S16 xp,yp;
    UG_U8 cw;
-   char chr;
+   wchar_t chr;
+   UG_U32 index;
 
    xp=x;
    yp=y;
@@ -4674,13 +4687,15 @@ void UG_PutString( UG_S16 x, UG_S16 y, char* str )
    while ( *str != 0 )
    {
       chr = *str++;
-	  if (chr < gui->font.start_char || chr > gui->font.end_char) continue;
-      if ( chr == '\n' )
+      if(_UG_SearchIndex(chr, &index) == UG_RESULT_FAIL) continue;
+      // printf("%c (%x) %d\n", chr, chr, index);
+      // continue;
+      if ( chr == L'\n' )
       {
          xp = gui->x_dim;
          continue;
       }
-	  cw = gui->font.widths ? gui->font.widths[chr - gui->font.start_char] : gui->font.char_width;
+	  cw = gui->font.widths ? gui->font.widths[index] : gui->font.char_width;
 
       if ( xp + cw > gui->x_dim - 1 )
       {
@@ -4694,27 +4709,34 @@ void UG_PutString( UG_S16 x, UG_S16 y, char* str )
    }
 }
 
-void UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc )
+void UG_PutChar( wchar_t chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc )
 {
 	_UG_PutChar(chr,x,y,fc,bc,&gui->font);
 }
 
-void UG_ConsolePutString( char* str )
+void UG_ConsolePutString( wchar_t* str )
 {
-   char chr;
+   wchar_t chr;
    UG_U8 cw;
+   UG_U32 ch_ix;
 
    while ( *str != 0 )
    {
       chr = *str;
-      if ( chr == '\n' )
+      if(_UG_SearchIndex(chr, &ch_ix) == UG_RESULT_FAIL)
+      {
+         str++;
+         continue;
+      }
+
+      if ( chr == L'\n' )
       {
          gui->console.x_pos = gui->x_dim;
          str++;
          continue;
       }
       
-      cw = gui->font.widths ? gui->font.widths[chr - gui->font.start_char] : gui->font.char_width;
+      cw = gui->font.widths ? gui->font.widths[ch_ix] : gui->font.char_width;
       gui->console.x_pos += cw+gui->char_h_space;
 
       if ( gui->console.x_pos+cw > gui->console.x_end )
@@ -4844,36 +4866,37 @@ const UG_COLOR pal_button_released[] =
 /* -------------------------------------------------------------------------------- */
 /* -- INTERNAL FUNCTIONS                                                         -- */
 /* -------------------------------------------------------------------------------- */
-void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const UG_FONT* font)
+void _UG_PutChar( wchar_t chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const UG_FONT* font)
 {
    UG_U16 i,j,k,xo,yo,c,bn,actual_char_width;
-   UG_U8 b,bt;
-   UG_U32 index;
+   wchar_t b,bt;
+   UG_U32 index, ch_ix;
    UG_COLOR color;
    void(*push_pixel)(UG_COLOR);
 
-   bt = (UG_U8)chr;
+   bt = chr;
+
 
    switch ( bt )
    {
-      case 0xF6: bt = 0x94; break; // ö
-      case 0xD6: bt = 0x99; break; // Ö
-      case 0xFC: bt = 0x81; break; // ü
-      case 0xDC: bt = 0x9A; break; // Ü
-      case 0xE4: bt = 0x84; break; // ä
-      case 0xC4: bt = 0x8E; break; // Ä
-      case 0xB5: bt = 0xE6; break; // µ
-      case 0xB0: bt = 0xF8; break; // °
+      case 0xF6: bt = 0x94; break; // <F6>
+      case 0xD6: bt = 0x99; break; // <D6>
+      case 0xFC: bt = 0x81; break; // <FC>
+      case 0xDC: bt = 0x9A; break; // <DC>
+      case 0xE4: bt = 0x84; break; // <E4>
+      case 0xC4: bt = 0x8E; break; // <C4>
+      case 0xB5: bt = 0xE6; break; // <B5>
+      case 0xB0: bt = 0xF8; break; // <B0>
    }
 
-   if (bt < font->start_char || bt > font->end_char) return;
-   
+   if(_UG_SearchIndex(bt, &ch_ix) == UG_RESULT_FAIL) return;
+
    yo = y;
    bn = font->char_width;
    if ( !bn ) return;
    bn >>= 3;
    if ( font->char_width % 8 ) bn++;
-   actual_char_width = (font->widths ? font->widths[bt - font->start_char] : font->char_width);
+   actual_char_width = (font->widths ? font->widths[ch_ix] : font->char_width);
 
    /* Is hardware acceleration available? */
    if ( gui->driver[DRIVER_FILL_AREA].state & DRIVER_ENABLED )
@@ -4883,7 +4906,7 @@ void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const 
 	   
       if (font->font_type == FONT_TYPE_1BPP)
 	  {
-	      index = (bt - font->start_char)* font->char_height * bn;
+	      index = ch_ix * font->char_height * bn;
 		  for( j=0;j<font->char_height;j++ )
 		  {
 			 c=actual_char_width;
@@ -4908,7 +4931,7 @@ void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const 
 	  }
 	  else if (font->font_type == FONT_TYPE_8BPP)
 	  {
-		   index = (bt - font->start_char)* font->char_height * font->char_width;
+		   index = ch_ix * font->char_height * font->char_width;
 		   for( j=0;j<font->char_height;j++ )
 		   {
 			  for( i=0;i<actual_char_width;i++ )
@@ -4928,7 +4951,7 @@ void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const 
 	   /*Not accelerated output*/
 	   if (font->font_type == FONT_TYPE_1BPP)
 	   {
-         index = (bt - font->start_char)* font->char_height * bn;
+         index = ch_ix * font->char_height * bn;
          for( j=0;j<font->char_height;j++ )
          {
            xo = x;
@@ -4956,7 +4979,7 @@ void _UG_PutChar( char chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, const 
       }
       else if (font->font_type == FONT_TYPE_8BPP)
       {
-         index = (bt - font->start_char)* font->char_height * font->char_width;
+         index = ch_ix * font->char_height * font->char_width;
          for( j=0;j<font->char_height;j++ )
          {
             xo = x;
@@ -4991,11 +5014,11 @@ void _UG_PutText(UG_TEXT* txt)
    UG_S16 char_v_space=txt->v_space;
    UG_U16 i,j,k,xo,yo,cw,bn;
    UG_U8  b,bt;
-   UG_U32 index;
-   char chr;
+   UG_U32 index, ch_ix;
+   wchar_t chr;
 
-   char* str = txt->str;
-   char* c = str;
+   wchar_t* str = txt->str;
+   wchar_t* c = str;
 
    if ( txt->font->p == NULL ) return;
    if ( str == NULL ) return;
@@ -5005,7 +5028,7 @@ void _UG_PutText(UG_TEXT* txt)
    c=str;
    while ( *c != 0 )
    {
-      if ( *c == '\n' ) rc++;
+      if ( *c == L'\n' ) rc++;
       c++;
    }
 
@@ -5025,11 +5048,11 @@ void _UG_PutText(UG_TEXT* txt)
       sl=0;
       c=str;
       wl = 0;
-      while( (*c != 0) && (*c != '\n') )
+      while( (*c != 0) && (*c != L'\n') )
       {
-         if (*c < txt->font->start_char || *c > txt->font->end_char) {c++; continue;}
+      	 if(_UG_SearchIndex(*c, &ch_ix) == UG_RESULT_FAIL) {c++; continue;}
          sl++;
-         wl += (txt->font->widths ? txt->font->widths[*c - txt->font->start_char] : char_width) + char_h_space;
+         wl += (txt->font->widths ? txt->font->widths[ch_ix] : char_width) + char_h_space;
          c++;
       }
       wl -= char_h_space;
@@ -5042,12 +5065,13 @@ void _UG_PutText(UG_TEXT* txt)
       else if ( align & ALIGN_H_CENTER ) xp >>= 1;
       xp += xs;
 
-      while( (*str != '\n') )
+      while( (*str != L'\n') )
       {
          chr = *str++;
          if ( chr == 0 ) return;
+         if(_UG_SearchIndex(chr, &ch_ix) == UG_RESULT_FAIL) continue;
          _UG_PutChar(chr,xp,yp,txt->fc,txt->bc,txt->font);
-         xp += (txt->font->widths ? txt->font->widths[chr - txt->font->start_char] : char_width) + char_h_space;
+         xp += (txt->font->widths ? txt->font->widths[ch_ix] : char_width) + char_h_space;
       }
       str++;
       yp += char_height + char_v_space;
@@ -5665,7 +5689,7 @@ UG_RESULT UG_WindowSetTitleInactiveColor( UG_WINDOW* wnd, UG_COLOR c )
    return UG_RESULT_FAIL;
 }
 
-UG_RESULT UG_WindowSetTitleText( UG_WINDOW* wnd, char* str )
+UG_RESULT UG_WindowSetTitleText( UG_WINDOW* wnd, wchar_t* str )
 {
    if ( (wnd != NULL) && (wnd->state & WND_STATE_VALID) )
    {
@@ -5869,9 +5893,9 @@ UG_COLOR UG_WindowGetTitleInactiveColor( UG_WINDOW* wnd )
    return c;
 }
 
-char* UG_WindowGetTitleText( UG_WINDOW* wnd )
+wchar_t* UG_WindowGetTitleText( UG_WINDOW* wnd )
 {
-   char* str = NULL;
+   wchar_t* str = NULL;
    if ( (wnd != NULL) && (wnd->state & WND_STATE_VALID) )
    {
       str = wnd->title.str;
@@ -6210,7 +6234,7 @@ UG_RESULT UG_ButtonCreate( UG_WINDOW* wnd, UG_BUTTON* btn, UG_U8 id, UG_S16 xs, 
    btn->style = BTN_STYLE_3D;
    btn->align = ALIGN_CENTER;
    btn->font = NULL;
-   btn->str = "-";
+   btn->str = L"-";
 
    /* Initialize standard object parameters */
    obj->update = _UG_ButtonUpdate;
@@ -6332,7 +6356,7 @@ UG_RESULT UG_ButtonSetAlternateBackColor( UG_WINDOW* wnd, UG_U8 id, UG_COLOR abc
    return UG_RESULT_OK;
 }
 
-UG_RESULT UG_ButtonSetText( UG_WINDOW* wnd, UG_U8 id, char* str )
+UG_RESULT UG_ButtonSetText( UG_WINDOW* wnd, UG_U8 id, wchar_t* str )
 {
    UG_OBJECT* obj=NULL;
    UG_BUTTON* btn=NULL;
@@ -6515,11 +6539,11 @@ UG_COLOR UG_ButtonGetAlternateBackColor( UG_WINDOW* wnd, UG_U8 id )
    return c;
 }
 
-char* UG_ButtonGetText( UG_WINDOW* wnd, UG_U8 id )
+wchar_t* UG_ButtonGetText( UG_WINDOW* wnd, UG_U8 id )
 {
    UG_OBJECT* obj=NULL;
    UG_BUTTON* btn=NULL;
-   char* str = NULL;
+   wchar_t* str = NULL;
 
    obj = _UG_SearchObject( wnd, OBJ_TYPE_BUTTON, id );
    if ( obj != NULL )
@@ -6832,7 +6856,7 @@ UG_RESULT UG_TextboxSetBackColor( UG_WINDOW* wnd, UG_U8 id, UG_COLOR bc )
    return UG_RESULT_OK;
 }
 
-UG_RESULT UG_TextboxSetText( UG_WINDOW* wnd, UG_U8 id, char* str )
+UG_RESULT UG_TextboxSetText( UG_WINDOW* wnd, UG_U8 id, wchar_t* str )
 {
    UG_OBJECT* obj=NULL;
    UG_TEXTBOX* txb=NULL;
@@ -6937,11 +6961,11 @@ UG_COLOR UG_TextboxGetBackColor( UG_WINDOW* wnd, UG_U8 id )
    return c;
 }
 
-char* UG_TextboxGetText( UG_WINDOW* wnd, UG_U8 id )
+wchar_t* UG_TextboxGetText( UG_WINDOW* wnd, UG_U8 id )
 {
    UG_OBJECT* obj=NULL;
    UG_TEXTBOX* txb=NULL;
-   char* str = NULL;
+   wchar_t* str = NULL;
 
    obj = _UG_SearchObject( wnd, OBJ_TYPE_TEXTBOX, id );
    if ( obj != NULL )
