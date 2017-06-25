@@ -435,13 +435,13 @@ void UG_DrawLine( UG_S16 x1, UG_S16 y1, UG_S16 x2, UG_S16 y2, UG_COLOR c )
    }
 }
 
-UG_RESULT _UG_SearchIndex(wchar_t unicode, UG_U32 *index)
+UG_RESULT _UG_SearchIndex(UG_FONT *font, wchar_t unicode, UG_U32 *index)
 {
 	int i;
-	for(i = 0; i < gui->font.dict_size; i++)
-		if(gui->font.dict[i].unicode == unicode)
+	for(i = 0; i < font->dict_size; i++)
+		if(font->dict[i].unicode == unicode)
 		{
-			*index = gui->font.dict[i].index;
+			*index = font->dict[i].index;
 			return UG_RESULT_OK;
 		}
 	return UG_RESULT_FAIL;
@@ -460,9 +460,8 @@ void UG_PutString( UG_S16 x, UG_S16 y, wchar_t* str )
    while ( *str != 0 )
    {
       chr = *str++;
-      if(_UG_SearchIndex(chr, &index) == UG_RESULT_FAIL) continue;
-      // printf("%c (%x) %d\n", chr, chr, index);
-      // continue;
+      if(_UG_SearchIndex(&gui->font, chr, &index) == UG_RESULT_FAIL) 
+         continue;
       if ( chr == L'\n' )
       {
          xp = gui->x_dim;
@@ -496,7 +495,7 @@ void UG_ConsolePutString( wchar_t* str )
    while ( *str != 0 )
    {
       chr = *str;
-      if(_UG_SearchIndex(chr, &ch_ix) == UG_RESULT_FAIL)
+      if(_UG_SearchIndex(&gui->font, chr, &ch_ix) == UG_RESULT_FAIL)
       {
          str++;
          continue;
@@ -649,7 +648,7 @@ void _UG_PutChar( wchar_t chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, con
 
    bt = chr;
 
-
+#if 0
    switch ( bt )
    {
       case 0xF6: bt = 0x94; break; // <F6>
@@ -661,8 +660,8 @@ void _UG_PutChar( wchar_t chr, UG_S16 x, UG_S16 y, UG_COLOR fc, UG_COLOR bc, con
       case 0xB5: bt = 0xE6; break; // <B5>
       case 0xB0: bt = 0xF8; break; // <B0>
    }
-
-   if(_UG_SearchIndex(bt, &ch_ix) == UG_RESULT_FAIL) return;
+#endif
+   if(_UG_SearchIndex(font, bt, &ch_ix) == UG_RESULT_FAIL) return;
 
    yo = y;
    bn = font->char_width;
@@ -793,9 +792,12 @@ void _UG_PutText(UG_TEXT* txt)
    wchar_t* str = txt->str;
    wchar_t* c = str;
 
-   if ( txt->font->p == NULL ) return;
-   if ( str == NULL ) return;
-   if ( (ye - ys) < txt->font->char_height ) return;
+   if ( txt->font->p == NULL )
+      return;
+   if ( str == NULL )
+      return;
+   if ( (ye - ys) < txt->font->char_height )
+      return;
 
    rc=1;
    c=str;
@@ -811,7 +813,8 @@ void _UG_PutText(UG_TEXT* txt)
       yp = ye - ys + 1;
       yp -= char_height*rc;
       yp -= char_v_space*(rc-1);
-      if ( yp < 0 ) return;
+      if ( yp < 0 )
+         return;
    }
    if ( align & ALIGN_V_CENTER ) yp >>= 1;
    yp += ys;
@@ -823,7 +826,7 @@ void _UG_PutText(UG_TEXT* txt)
       wl = 0;
       while( (*c != 0) && (*c != L'\n') )
       {
-      	 if(_UG_SearchIndex(*c, &ch_ix) == UG_RESULT_FAIL) {c++; continue;}
+      	if(_UG_SearchIndex(txt->font, *c, &ch_ix) == UG_RESULT_FAIL) {c++; continue;}
          sl++;
          wl += (txt->font->widths ? txt->font->widths[ch_ix] : char_width) + char_h_space;
          c++;
@@ -832,7 +835,8 @@ void _UG_PutText(UG_TEXT* txt)
 
       xp = xe - xs + 1;
       xp -= wl;
-      if ( xp < 0 ) return;
+      if ( xp < 0 )
+         return;
 
       if ( align & ALIGN_H_LEFT ) xp = 0;
       else if ( align & ALIGN_H_CENTER ) xp >>= 1;
@@ -842,7 +846,8 @@ void _UG_PutText(UG_TEXT* txt)
       {
          chr = *str++;
          if ( chr == 0 ) return;
-         if(_UG_SearchIndex(chr, &ch_ix) == UG_RESULT_FAIL) continue;
+         if(_UG_SearchIndex(txt->font, chr, &ch_ix) == UG_RESULT_FAIL)
+            continue;
          _UG_PutChar(chr,xp,yp,txt->fc,txt->bc,txt->font);
          xp += (txt->font->widths ? txt->font->widths[ch_ix] : char_width) + char_h_space;
       }
