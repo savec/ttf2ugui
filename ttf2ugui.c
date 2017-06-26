@@ -62,7 +62,13 @@ static int max(int a, int b)
 {
   if (a > b)
     return a;
+  return b;
+}
 
+static int min(int a, int b)
+{
+  if (a < b)
+    return a;
   return b;
 }
 
@@ -270,7 +276,7 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
 
   charcode = FT_Get_First_Char( face, &gindex );
 
-  int minChar = gindex;
+  int minChar = INT_MAX;
   int maxChar = 0;
   int num_chars;
   // int ch;
@@ -299,9 +305,10 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
     maxAscent = max(maxAscent, ascent);
     maxWidth = max(face->glyph->bitmap.width, maxWidth);
     maxChar = max(maxChar, gindex);
+    minChar = min(minChar, gindex);
 
     ++dict_size;
-      charcode = FT_Get_Next_Char( face, charcode, &gindex );
+    charcode = FT_Get_Next_Char( face, charcode, &gindex );
   }
 
   num_chars = maxChar - minChar + 1;
@@ -319,6 +326,8 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
   bytesPerChar = bytesPerRow * maxHeight;
 
   newFont.p = malloc(bytesPerChar * num_chars);
+  if(!newFont.p)
+    perror("malloc\n");
   memset(newFont.p, '\0', bytesPerChar * num_chars);
 
   newFont.font_type = FONT_TYPE_1BPP;
@@ -328,6 +337,8 @@ static UG_FONT *convertFont(const char *font, int dpi, float fontSize)
   newFont.num_chars = num_chars;
 
   newFont.dict = malloc(sizeof(UG_CHAR_CODE)*dict_size);
+  if(!newFont.dict)
+    perror("malloc");
   memset(newFont.dict, 0, sizeof(UG_CHAR_CODE)*dict_size);
   newFont.dict_size = dict_size;
 

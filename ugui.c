@@ -435,7 +435,7 @@ void UG_DrawLine( UG_S16 x1, UG_S16 y1, UG_S16 x2, UG_S16 y2, UG_COLOR c )
    }
 }
 
-UG_RESULT _UG_SearchIndex(UG_FONT *font, wchar_t unicode, UG_U32 *index)
+UG_RESULT _UG_SearchIndex(const UG_FONT *font, wchar_t unicode, UG_U32 *index)
 {
 	int i;
 	for(i = 0; i < font->dict_size; i++)
